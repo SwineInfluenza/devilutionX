@@ -1066,11 +1066,13 @@ static int SaveMpqTable(
         BSWAP_ARRAY32_UNSIGNED(pMpqTable, Size);
     }
 
+#ifdef FULL
     // Calculate the MD5
     if(md5 != NULL)
     {
         CalculateDataBlockHash(pMpqTable, (DWORD)Size, md5);
     }
+#endif
 
     // Save the table to the MPQ
     BSWAP_ARRAY32_UNSIGNED(pMpqTable, Size);
@@ -1389,7 +1391,6 @@ static TMPQExtHeader * TranslateHetTable(TMPQHetTable * pHetTable, ULONGLONG * p
     assert((TMPQExtHeader *)&pHetHeader->ExtHdr == (TMPQExtHeader *)pbLinearTable);
     return (TMPQExtHeader *)pbLinearTable;
 }
-
 
 static DWORD GetFileIndex_Het(TMPQArchive * ha, const char * szFileName)
 {
@@ -2600,7 +2601,6 @@ void UpdateBlockTableSize(TMPQArchive * ha)
 }
 */
 
-#ifdef FULL
 // Defragment the file table so it does not contain any gaps
 int DefragmentFileTable(TMPQArchive * ha)
 {
@@ -2683,6 +2683,7 @@ int DefragmentFileTable(TMPQArchive * ha)
     return ERROR_SUCCESS;
 }
 
+#ifdef FULL
 // Rebuilds the HET table from scratch based on the file table
 // Used after a modifying operation (add, rename, delete)
 int RebuildHetTable(TMPQArchive * ha)
@@ -2724,6 +2725,7 @@ int RebuildHetTable(TMPQArchive * ha)
     FreeHetTable(pOldHetTable);
     return nError;
 }
+#endif
 
 // Rebuilds the file table, removing all deleted file entries.
 // Used when compacting the archive
@@ -2817,6 +2819,7 @@ int SaveMPQTables(TMPQArchive * ha)
     // Find the space where the MPQ tables will be saved
     TablePos = FindFreeMpqSpace(ha);
 
+#ifdef FULL
     // If the MPQ has HET table, we prepare a ready-to-save version
     if(nError == ERROR_SUCCESS && ha->pHetTable != NULL)
     {
@@ -2832,6 +2835,7 @@ int SaveMPQTables(TMPQArchive * ha)
         if(pBetTable == NULL)
             nError = ERROR_NOT_ENOUGH_MEMORY;
     }
+#endif
 
     // Now create hash table
     if(nError == ERROR_SUCCESS && ha->pHashTable != NULL)
@@ -2857,6 +2861,7 @@ int SaveMPQTables(TMPQArchive * ha)
             nError = ERROR_NOT_ENOUGH_MEMORY;
     }
 
+#ifdef FULL
     // Write the HET table, if any
     if(nError == ERROR_SUCCESS && pHetTable != NULL)
     {
@@ -2874,6 +2879,7 @@ int SaveMPQTables(TMPQArchive * ha)
         nError = SaveExtTable(ha, pBetTable, TablePos, (DWORD)BetTableSize64, pHeader->MD5_BetTable, MPQ_KEY_BLOCK_TABLE, false, &cbTotalSize);
         TablePos += cbTotalSize;
     }
+#endif
 
     // Write the hash table, if we have any
     if(nError == ERROR_SUCCESS && pHashTable != NULL)
@@ -2929,8 +2935,10 @@ int SaveMPQTables(TMPQArchive * ha)
         pHeader->ArchiveSize64 = TablePos;
         pHeader->dwArchiveSize = (DWORD)TablePos;
 
+#ifdef FULL
         // Update the MD5 of the archive header
         CalculateDataBlockHash(pHeader, MPQ_HEADER_SIZE_V4 - MD5_DIGEST_SIZE, pHeader->MD5_MpqHeader);
+#endif
 
         // Write the MPQ header to the file
         memcpy(&SaveMpqHeader, pHeader, pHeader->dwHeaderSize);
@@ -2959,4 +2967,3 @@ int SaveMPQTables(TMPQArchive * ha)
         STORM_FREE(pHiBlockTable);
     return nError;
 }
-#endif

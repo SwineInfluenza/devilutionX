@@ -41,4 +41,7 @@ void SavePortal(int i);
 void SaveLevel();
 void LoadLevel();
 
+void SaveGameData(BYTE *SaveBuff, DWORD* pdwLen);
+void SaveLevelData(BYTE *SaveBuff, DWORD* pdwLen);
+
 #endif /* __LOADSAVE_H__ */

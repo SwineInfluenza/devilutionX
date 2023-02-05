@@ -1,5 +1,7 @@
 #include "all.h"
 
+#include "demomode.h"
+
 DEVILUTION_BEGIN_NAMESPACE
 
 static BYTE sgbIsScrolling;
@@ -19,7 +21,8 @@ void track_process()
 
 	if (cursmx != plr[myplr]._ptargx || cursmy != plr[myplr]._ptargy) {
 		DWORD tick = SDL_GetTicks();
-		if ((int)(tick - sgdwLastWalk) >= 300) {
+		// NOTE: This delay is causing inconsistencies while recording and replaying the demo
+		if (demo::IsRecording() || demo::IsRunning() || (int)(tick - sgdwLastWalk) >= 300) {
 			sgdwLastWalk = tick;
 			NetSendCmdLoc(TRUE, CMD_WALKXY, cursmx, cursmy);
 			if (!sgbIsScrolling)

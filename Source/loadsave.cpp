@@ -819,13 +819,9 @@ void LoadPortal(int i)
 	CopyInt(tbuff, &pPortal->setlvl);
 }
 
-void SaveGame()
+void SaveGameData(BYTE *SaveBuff, DWORD* pdwLen)
 {
 	int i, j;
-	char szName[MAX_PATH];
-
-	DWORD dwLen = codec_get_encoded_len(FILEBUFF);
-	BYTE *SaveBuff = DiabloAllocPtr(dwLen);
 	tbuff = SaveBuff;
 
 	ISave('RETL');
@@ -953,9 +949,23 @@ void SaveGame()
 
 	OSave(automapflag);
 	WSave(AutoMapScale);
+
+	*pdwLen = tbuff - SaveBuff;
+}
+
+void SaveGame()
+{
+	char szName[MAX_PATH];
+
+	DWORD dwFileLen = codec_get_encoded_len(FILEBUFF);
+	BYTE *SaveBuff = DiabloAllocPtr(dwFileLen);
+
+	DWORD dwDataLen;
+	SaveGameData(SaveBuff, &dwDataLen);
+
 	pfile_get_game_name(szName);
-	dwLen = codec_get_encoded_len(tbuff - SaveBuff);
-	pfile_write_save_file(szName, SaveBuff, tbuff - SaveBuff, dwLen);
+	dwFileLen = codec_get_encoded_len(dwDataLen);
+	pfile_write_save_file(szName, SaveBuff, dwDataLen, dwFileLen);
 	mem_free_dbg(SaveBuff);
 	gbValidSaveFile = TRUE;
 	pfile_rename_temp_to_perm();
@@ -1537,18 +1547,9 @@ void SavePortal(int i)
 	CopyInt(&pPortal->setlvl, tbuff);
 }
 
-void SaveLevel()
+void SaveLevelData(BYTE *SaveBuff, DWORD *pdwLen)
 {
 	int i, j;
-	char szName[MAX_PATH];
-	int dwLen;
-	BYTE *SaveBuff;
-
-	if (!currlevel)
-		glSeedTbl[0] = GetRndSeed();
-
-	dwLen = codec_get_encoded_len(FILEBUFF);
-	SaveBuff = DiabloAllocPtr(dwLen);
 	tbuff = SaveBuff;
 
 	if (leveltype != DTYPE_TOWN) {
@@ -1618,9 +1619,27 @@ void SaveLevel()
 		}
 	}
 
+	*pdwLen = tbuff - SaveBuff;
+	}
+
+void SaveLevel()
+{
+	char szName[MAX_PATH];
+	int dwFileLen;
+	BYTE *SaveBuff;
+
+	if (!currlevel)
+		glSeedTbl[0] = GetRndSeed();
+
+	dwFileLen = codec_get_encoded_len(FILEBUFF);
+	SaveBuff = DiabloAllocPtr(dwFileLen);
+
+	DWORD dwDataLen;
+	SaveLevelData(SaveBuff, &dwDataLen);
+
 	GetTempLevelNames(szName);
-	dwLen = codec_get_encoded_len(tbuff - SaveBuff);
-	pfile_write_save_file(szName, SaveBuff, tbuff - SaveBuff, dwLen);
+	dwFileLen = codec_get_encoded_len(dwDataLen);
+	pfile_write_save_file(szName, SaveBuff, dwDataLen, dwFileLen);
 	mem_free_dbg(SaveBuff);
 
 	if (!setlevel)

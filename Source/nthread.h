@@ -15,6 +15,8 @@ extern DWORD gdwLargestMsgSize;
 extern DWORD gdwNormalMsgSize;
 extern int last_tick;
 
+extern uint8_t gbProgressToNextGameTick; // demomode compatibility
+
 void nthread_terminate_game(const char *pszFcn);
 DWORD nthread_send_and_recv_turn(DWORD cur_turn, int turn_delta);
 BOOL nthread_recv_turns(BOOL *pfSendAsync);
@@ -24,6 +26,8 @@ unsigned int nthread_handler(void *);
 void nthread_cleanup();
 void nthread_ignore_mutex(BOOL bStart);
 BOOL nthread_has_500ms_passed(BOOL unused);
+
+void nthread_UpdateProgressToNextGameTick();
 
 /* rdata */
 

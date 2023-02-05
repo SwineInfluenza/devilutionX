@@ -2,6 +2,8 @@
 #include "../3rdParty/Storm/Source/storm.h"
 #include "../DiabloUI/diabloui.h"
 
+#include "demomode.h"
+
 DEVILUTION_BEGIN_NAMESPACE
 
 char gszHero[16];
@@ -40,7 +42,10 @@ int mainmenu_select_hero_dialog(
 {
 	BOOL hero_is_created = TRUE;
 	int dlgresult = 0;
-	if (gbMaxPlayers == 1) {
+	if (demo::IsRunning()) {
+		pfile_ui_set_hero_infos(demo::GetHeroInfoCallback);
+		gbLoadGame = TRUE;
+	} else if (gbMaxPlayers == 1) {
 		if (!UiSelHeroSingDialog(
 		        pfile_ui_set_hero_infos,
 		        pfile_ui_save_create,
@@ -94,7 +99,9 @@ void mainmenu_loop()
 
 	do {
 		menu = 0;
-		if (!UiMainMenuDialog(gszProductName, &menu, effects_play_sound, 30))
+		if (demo::IsRunning())
+			menu = MAINMENU_SINGLE_PLAYER;
+		else if (!UiMainMenuDialog(gszProductName, &menu, effects_play_sound, 30))
 			app_fatal("Unable to display mainmenu");
 
 		switch (menu) {

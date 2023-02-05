@@ -12,6 +12,13 @@ void ShowProgress(unsigned int uMsg);
 void FreeInterface();
 void InitCutscene(unsigned int uMsg);
 
+void RegisterCustomEvents();
+bool IsCustomEvent(uint32_t eventType);
+uint32_t GetCustomEvent(uint32_t eventType);
+interface_mode GetCustomMessage(uint32_t eventType);
+uint32_t CustomEventToSdlEvent(uint32_t eventType);
+uint32_t CustomMessageToSdlEvent(interface_mode messageType);
+
 /* rdata */
 
 extern const BYTE BarColor[3];

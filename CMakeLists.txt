@@ -166,6 +166,9 @@ add_library(StormLib STATIC
   3rdParty/StormLib/src/SBaseFileTable.cpp
   3rdParty/StormLib/src/SBaseSubTypes.cpp
   3rdParty/StormLib/src/SCompression.cpp
+  3rdParty/StormLib/src/SFileAddFile.cpp
+  3rdParty/StormLib/src/SFileCompactArchive.cpp
+  3rdParty/StormLib/src/SFileCreateArchive.cpp
   3rdParty/StormLib/src/SFileExtractFile.cpp
   3rdParty/StormLib/src/SFileFindFile.cpp
   3rdParty/StormLib/src/SFileGetFileInfo.cpp
@@ -186,6 +189,7 @@ add_library(devilution STATIC
   Source/cursor.cpp
   Source/dead.cpp
   Source/debug.cpp
+  Source/demomode.cpp
   Source/diablo.cpp
   Source/doom.cpp
   Source/drlg_l1.cpp

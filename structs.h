@@ -1206,6 +1206,7 @@ typedef struct DeadStruct {
 typedef struct _gamedata {
 	int dwSeed;
 	BYTE bDiff;
+	BYTE nTickRate; // demomode compatibility
 } _gamedata;
 
 typedef struct _uidefaultstats {

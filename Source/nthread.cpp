@@ -1,6 +1,8 @@
 #include "all.h"
 #include "../3rdParty/Storm/Source/storm.h"
 
+#include "demomode.h"
+
 DEVILUTION_BEGIN_NAMESPACE
 
 BYTE sgbNetUpdateRate;
@@ -19,6 +21,8 @@ BOOLEAN sgbThreadIsRunning;
 DWORD gdwLargestMsgSize;
 DWORD gdwNormalMsgSize;
 int last_tick;
+
+uint8_t gbProgressToNextGameTick = 0;
 
 /* data */
 static SDL_Thread *sghThread = NULL;
@@ -74,7 +78,7 @@ BOOL nthread_recv_turns(BOOL *pfSendAsync)
 	*pfSendAsync = FALSE;
 	sgbPacketCountdown--;
 	if (sgbPacketCountdown) {
-		last_tick += 50;
+		last_tick += gnTickDelay;
 		return TRUE;
 	}
 	sgbSyncCountdown--;
@@ -82,7 +86,7 @@ BOOL nthread_recv_turns(BOOL *pfSendAsync)
 	if (sgbSyncCountdown != 0) {
 
 		*pfSendAsync = TRUE;
-		last_tick += 50;
+		last_tick += gnTickDelay;
 		return TRUE;
 	}
 	if (!SNetReceiveTurns(0, MAX_PLRS, (char **)glpMsgTbl, gdwMsgLenTbl, (LPDWORD)player_state)) {
@@ -100,7 +104,7 @@ BOOL nthread_recv_turns(BOOL *pfSendAsync)
 		sgbSyncCountdown = 4;
 		multi_msg_countdown();
 		*pfSendAsync = TRUE;
-		last_tick += 50;
+		last_tick += gnTickDelay;
 		return TRUE;
 	}
 }
@@ -179,7 +183,7 @@ unsigned int nthread_handler(void *)
 			if (nthread_recv_turns(&received))
 				delta = last_tick - SDL_GetTicks();
 			else
-				delta = 50;
+				delta = gnTickDelay;
 			sgMemCrit.Leave();
 			if (delta > 0)
 				SDL_Delay(delta);
@@ -223,11 +227,27 @@ BOOL nthread_has_500ms_passed(BOOL unused)
 
 	currentTickCount = SDL_GetTicks();
 	ticksElapsed = currentTickCount - last_tick;
-	if (gbMaxPlayers == 1 && ticksElapsed > 500) {
+	if (gbMaxPlayers == 1 && ticksElapsed > gnTickDelay * 10) {
 		last_tick = currentTickCount;
 		ticksElapsed = 0;
 	}
 	return ticksElapsed >= 0;
+}
+
+void nthread_UpdateProgressToNextGameTick()
+{
+	if (!gbRunGame || PauseMode != 0 || (!(gbMaxPlayers > 1) && gmenu_is_active()) || !gbProcessPlayers || demo::IsRunning()) // if game is not running or paused there is no next gametick in the near future
+		return;
+	int currentTickCount = SDL_GetTicks();
+	int ticksMissing = last_tick - currentTickCount;
+	if (ticksMissing <= 0) {
+		gbProgressToNextGameTick = AnimationScalingFactor; // game tick is due
+		return;
+	}
+	int ticksAdvanced = gnTickDelay - ticksMissing;
+	int32_t fraction = ticksAdvanced * AnimationScalingFactor / gnTickDelay;
+	fraction = std::min<int32_t>(std::max(fraction, 0), AnimationScalingFactor); // std::clamp
+	gbProgressToNextGameTick = static_cast<uint8_t>(fraction);
 }
 
 DEVILUTION_END_NAMESPACE

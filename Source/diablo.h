@@ -70,6 +70,7 @@ void diablo_color_cyc_logic();
 /* rdata */
 
 extern BOOL fullscreen;
+extern int gnTickDelay;
 extern int showintrodebug;
 #ifdef _DEBUG
 extern int questdebug;

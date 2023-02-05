@@ -2,6 +2,8 @@
 #include "../3rdParty/Storm/Source/storm.h"
 #include "../DiabloUI/diabloui.h"
 
+#include "demomode.h"
+
 DEVILUTION_BEGIN_NAMESPACE
 
 BOOLEAN gbSomebodyWonGameKludge;
@@ -633,6 +635,7 @@ BOOL NetInit(BOOL bSinglePlayer, BOOL *pfExitProgram)
 		SetRndSeed(0);
 		sgGameInitInfo.dwSeed = time(NULL);
 		sgGameInitInfo.bDiff = gnDifficulty;
+		sgGameInitInfo.nTickRate = GameBasicTickRate;
 		memset(&ProgramData, 0, sizeof(ProgramData));
 		ProgramData.size = sizeof(ProgramData);
 #ifdef SPAWN
@@ -707,6 +710,7 @@ BOOL NetInit(BOOL bSinglePlayer, BOOL *pfExitProgram)
 	}
 	gnDifficulty = sgGameInitInfo.bDiff;
 	SetRndSeed(sgGameInitInfo.dwSeed);
+	gnTickDelay = 1000 / sgGameInitInfo.nTickRate;
 
 	for (i = 0; i < 17; i++) {
 		glSeedTbl[i] = GetRndSeed();

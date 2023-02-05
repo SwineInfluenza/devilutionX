@@ -197,24 +197,37 @@ SNetSendTurn(
       char    *data,
       unsigned int  databytes);
 
-BOOL STORMAPI SFileCloseArchive(HANDLE hArchive);
-BOOL STORMAPI SFileCloseFile(HANDLE hFile);
+void SFileFreeChunk();
 
 BOOL STORMAPI SFileDdaBeginEx(HANDLE hFile, DWORD flags, DWORD mask, unsigned __int32 lDistanceToMove, signed __int32 volume, signed int pan, int a7);
-void SFileFreeChunk();
 BOOL STORMAPI SFileDdaDestroy();
 BOOL STORMAPI SFileDdaEnd(HANDLE hFile);
 BOOL STORMAPI SFileDdaGetPos(HANDLE hFile, DWORD *current, DWORD *end);
-
 BOOL STORMAPI SFileDdaSetVolume(HANDLE hFile, signed int bigvolume, signed int volume);
 
-LONG STORMAPI SFileGetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh);
-BOOL STORMAPI SFileOpenArchive(const char *szMpqName, DWORD dwPriority, DWORD dwFlags, HANDLE *phMpq);
+BOOL STORMAPI SFileCreateArchive(const char *szMpqName, DWORD dwCreateFlags, DWORD dwMaxFileCount, HANDLE *phMpq);
 
+BOOL STORMAPI SFileCompactArchive(HANDLE hMpq, const char *szListFile, bool /* bReserved */);
+
+BOOL STORMAPI SFileOpenArchive(const char *szMpqName, DWORD dwPriority, DWORD dwFlags, HANDLE *phMpq);
+BOOL STORMAPI SFileFlushArchive(HANDLE hMpq);
+BOOL STORMAPI SFileCloseArchive(HANDLE hArchive);
+
+BOOL STORMAPI SFileHasFile(HANDLE hMpq, const char *szFileName);
 BOOL STORMAPI SFileOpenFile(const char *filename, HANDLE *phFile);
 BOOL STORMAPI SFileOpenFileEx(HANDLE hMpq, const char *szFileName, DWORD dwSearchScope, HANDLE *phFile);
+BOOL STORMAPI SFileCloseFile(HANDLE hFile);
 
 BOOL STORMAPI SFileReadFile(HANDLE hFile, void *buffer, DWORD nNumberOfBytesToRead, DWORD *read, LONG *lpDistanceToMoveHigh);
+LONG STORMAPI SFileGetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh);
+
+BOOL STORMAPI SFileCreateFile(HANDLE hMpq, const char *szArchivedName, unsigned long long FileTime, DWORD dwFileSize, unsigned int lcLocale, DWORD dwFlags, HANDLE *phFile);
+BOOL STORMAPI SFileWriteFile(HANDLE hFile, const void *pvData, DWORD dwSize, DWORD dwCompression);
+BOOL STORMAPI SFileFinishFile(HANDLE hFile);
+BOOL STORMAPI SFileAddFile(HANDLE hMpq, const char *szFileName, const char *szArchivedName, DWORD dwFlags);
+BOOL STORMAPI SFileAddFileEx(HANDLE hMpq, const char *szFileName, const char *szArchivedName, DWORD dwFlags, DWORD dwCompression, DWORD dwCompressionNext);
+BOOL STORMAPI SFileRemoveFile(HANDLE hMpq, const char *szFileName, DWORD dwSearchScope);
+BOOL STORMAPI SFileRenameFile(HANDLE hMpq, const char *szFileName, const char *szNewFileName);
 
 /*  SBmpLoadImage @ 323
  *

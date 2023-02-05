@@ -51,6 +51,8 @@ bool SpawnWindow(const char *lpWindowName, int nWidth, int nHeight)
 		ErrSdl();
 	}
 
+	RegisterCustomEvents(); // demomode compatibility
+
 	atexit(SDL_Quit);
 
 #ifdef USE_SDL1

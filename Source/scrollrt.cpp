@@ -1283,6 +1283,8 @@ void DrawAndBlit()
 
 	force_redraw = 0;
 
+	nthread_UpdateProgressToNextGameTick(); // demomode compatibility
+
 	lock_buf(0);
 	DrawView(ViewX, ViewY);
 	if (ctrlPan) {

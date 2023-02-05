@@ -2,6 +2,8 @@
 #include "../SourceX/display.h"
 #include "../3rdParty/Storm/Source/storm.h"
 
+#include "demomode.h"
+
 DEVILUTION_BEGIN_NAMESPACE
 
 SDL_Color logical_palette[256];
@@ -166,12 +168,14 @@ void PaletteFadeIn(int fr)
 	int i;
 
 	ApplyGamma(logical_palette, orig_palette, 256);
-	DWORD tc = SDL_GetTicks();
-	for (i = 0; i < 256; i = (SDL_GetTicks() - tc) / 2.083) { // 32 frames @ 60hz
-		SetFadeLevel(i);
-		SDL_Rect SrcRect = { SCREEN_X, SCREEN_Y, SCREEN_WIDTH, SCREEN_HEIGHT };
-		BltFast(&SrcRect, NULL);
-		RenderPresent();
+	if (!demo::IsRunning()) {
+		DWORD tc = SDL_GetTicks();
+		for (i = 0; i < 256; i = (SDL_GetTicks() - tc) / 2.083) { // 32 frames @ 60hz
+			SetFadeLevel(i);
+			SDL_Rect SrcRect = { SCREEN_X, SCREEN_Y, SCREEN_WIDTH, SCREEN_HEIGHT };
+			BltFast(&SrcRect, NULL);
+			RenderPresent();
+		}
 	}
 	SetFadeLevel(256);
 	memcpy(logical_palette, orig_palette, sizeof(orig_palette));
@@ -183,12 +187,14 @@ void PaletteFadeOut(int fr)
 	int i;
 
 	if (sgbFadedIn) {
-		DWORD tc = SDL_GetTicks();
-		for (i = 256; i > 0; i = 256 - (SDL_GetTicks() - tc) / 2.083) { // 32 frames @ 60hz
-			SetFadeLevel(i);
-			SDL_Rect SrcRect = { SCREEN_X, SCREEN_Y, SCREEN_WIDTH, SCREEN_HEIGHT };
-			BltFast(&SrcRect, NULL);
-			RenderPresent();
+		if (!demo::IsRunning()) {
+			DWORD tc = SDL_GetTicks();
+			for (i = 256; i > 0; i = 256 - (SDL_GetTicks() - tc) / 2.083) { // 32 frames @ 60hz
+				SetFadeLevel(i);
+				SDL_Rect SrcRect = { SCREEN_X, SCREEN_Y, SCREEN_WIDTH, SCREEN_HEIGHT };
+				BltFast(&SrcRect, NULL);
+				RenderPresent();
+			}
 		}
 		SetFadeLevel(0);
 		sgbFadedIn = FALSE;

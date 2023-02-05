@@ -12,6 +12,8 @@
 #include "display.h"
 #include "controls/controller.h"
 
+#include "demomode.h"
+
 #ifdef __SWITCH__
 #include "platform/switch/docking.h"
 #include <switch.h>
@@ -35,7 +37,9 @@ void SetCursorPos(int X, int Y)
 	mouseWarpingX = X;
 	mouseWarpingY = Y;
 	mouseWarping = true;
+
 	LogicalToOutput(&X, &Y);
+	if (!demo::IsRunning())
 	SDL_WarpMouseInWindow(window, X, Y);
 }
 
@@ -249,9 +253,10 @@ LPARAM position_for_mouse(short x, short y)
 	return (((uint16_t)(y & 0xFFFF)) << 16) | (uint16_t)(x & 0xFFFF);
 }
 
-WPARAM keystate_for_mouse(WPARAM ret)
+WPARAM keystate_for_mouse(SDL_Keymod mod, WPARAM ret = 0)
 {
-	ret |= (SDL_GetModState() & KMOD_SHIFT) ? DVL_MK_SHIFT : 0;
+	if (mod & KMOD_SHIFT)
+		ret |= DVL_MK_SHIFT;
 	// XXX: other DVL_MK_* codes not implemented
 	return ret;
 }
@@ -342,22 +347,11 @@ bool BlurInventory()
 	return true;
 }
 
-bool PeekMessageA(LPMSG lpMsg)
+bool PeekMessageA(LPMSG lpMsg, SDL_Event &e, SDL_Keymod &m)
 {
 #ifdef __SWITCH__
 	HandleDocking();
 #endif
-
-	if (!message_queue.empty()) {
-		*lpMsg = message_queue.front();
-		message_queue.pop_front();
-		return true;
-	}
-
-	SDL_Event e;
-	if (!SDL_PollEvent(&e)) {
-		return false;
-	}
 
 	lpMsg->message = 0;
 	lpMsg->lParam = 0;
@@ -365,6 +359,11 @@ bool PeekMessageA(LPMSG lpMsg)
 
 	if (e.type == SDL_QUIT) {
 		lpMsg->message = DVL_WM_QUIT;
+		return true;
+	}
+
+	if (IsCustomEvent(e.type)) {
+		lpMsg->message = GetCustomMessage(e.type);
 		return true;
 	}
 
@@ -522,18 +521,18 @@ bool PeekMessageA(LPMSG lpMsg)
 	case SDL_MOUSEMOTION:
 		lpMsg->message = DVL_WM_MOUSEMOVE;
 		lpMsg->lParam = position_for_mouse(e.motion.x, e.motion.y);
-		lpMsg->wParam = keystate_for_mouse(0);
+		lpMsg->wParam = keystate_for_mouse(m);
 		break;
 	case SDL_MOUSEBUTTONDOWN: {
 		int button = e.button.button;
 		if (button == SDL_BUTTON_LEFT) {
 			lpMsg->message = DVL_WM_LBUTTONDOWN;
 			lpMsg->lParam = position_for_mouse(e.button.x, e.button.y);
-			lpMsg->wParam = keystate_for_mouse(DVL_MK_LBUTTON);
+			lpMsg->wParam = keystate_for_mouse(m, DVL_MK_LBUTTON);
 		} else if (button == SDL_BUTTON_RIGHT) {
 			lpMsg->message = DVL_WM_RBUTTONDOWN;
 			lpMsg->lParam = position_for_mouse(e.button.x, e.button.y);
-			lpMsg->wParam = keystate_for_mouse(DVL_MK_RBUTTON);
+			lpMsg->wParam = keystate_for_mouse(m, DVL_MK_RBUTTON);
 		}
 	} break;
 	case SDL_MOUSEBUTTONUP: {
@@ -541,20 +540,20 @@ bool PeekMessageA(LPMSG lpMsg)
 		if (button == SDL_BUTTON_LEFT) {
 			lpMsg->message = DVL_WM_LBUTTONUP;
 			lpMsg->lParam = position_for_mouse(e.button.x, e.button.y);
-			lpMsg->wParam = keystate_for_mouse(0);
+			lpMsg->wParam = keystate_for_mouse(m);
 		} else if (button == SDL_BUTTON_RIGHT) {
 			lpMsg->message = DVL_WM_RBUTTONUP;
 			lpMsg->lParam = position_for_mouse(e.button.x, e.button.y);
-			lpMsg->wParam = keystate_for_mouse(0);
+			lpMsg->wParam = keystate_for_mouse(m);
 		}
 	} break;
 #ifndef USE_SDL1
 	case SDL_MOUSEWHEEL:
 		lpMsg->message = DVL_WM_KEYDOWN;
 		if (e.wheel.y > 0) {
-			lpMsg->wParam = GetAsyncKeyState(DVL_VK_CONTROL) ? DVL_VK_OEM_PLUS : DVL_VK_UP;
+			lpMsg->wParam = m & KMOD_CTRL ? DVL_VK_OEM_PLUS : DVL_VK_UP;
 		} else if (e.wheel.y < 0) {
-			lpMsg->wParam = GetAsyncKeyState(DVL_VK_CONTROL) ? DVL_VK_OEM_MINUS : DVL_VK_DOWN;
+			lpMsg->wParam = m & KMOD_CTRL ? DVL_VK_OEM_MINUS : DVL_VK_DOWN;
 		} else if (e.wheel.x > 0) {
 			lpMsg->wParam = DVL_VK_LEFT;
 		} else if (e.wheel.x < 0) {
@@ -621,6 +620,35 @@ bool PeekMessageA(LPMSG lpMsg)
 		return false_avail("unknown", e.type);
 	}
 	return true;
+}
+
+bool PeekMessageA(tagMSG *lpMsg)
+{
+	// WM_CHAR
+	if (!message_queue.empty()) {
+		*lpMsg = message_queue.front();
+		message_queue.pop_front();
+		return true;
+	}
+
+	SDL_Event event {};
+	SDL_Keymod modState { SDL_GetModState() };
+
+	bool available = false;
+	if (demo::IsRunning()) {
+		if (demo::FetchMessage(event, modState)) {
+			available = PeekMessageA(lpMsg, event, modState);
+		}
+	} else {
+		if (SDL_PollEvent(&event)) {
+			available = PeekMessageA(lpMsg, event, modState);
+		}
+	}
+
+	if (available && demo::IsRecording())
+		demo::RecordMessage(event, modState);
+
+	return available;
 }
 
 bool TranslateMessage(const MSG *lpMsg)
@@ -722,7 +750,8 @@ bool TranslateMessage(const MSG *lpMsg)
 #endif
 
 			// XXX: This does not add extended info to lParam
-			PostMessageA(DVL_WM_CHAR, key, 0);
+			MSG msg { DVL_WM_CHAR, key, 0 };
+			message_queue.push_back(msg);
 		}
 	}
 
@@ -765,12 +794,8 @@ LRESULT DispatchMessageA(const MSG *lpMsg)
 
 bool PostMessageA(UINT Msg, WPARAM wParam, LPARAM lParam)
 {
-	MSG msg;
-	msg.message = Msg;
-	msg.wParam = wParam;
-	msg.lParam = lParam;
-
-	message_queue.push_back(msg);
+	SDL_Event event { CustomMessageToSdlEvent(static_cast<interface_mode>(Msg)) };
+	SDL_PushEvent(&event);
 
 	return true;
 }

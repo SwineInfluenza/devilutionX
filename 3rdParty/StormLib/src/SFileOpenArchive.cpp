@@ -467,7 +467,6 @@ bool STORMAPI SFileOpenArchive(
     return (nError == ERROR_SUCCESS);
 }
 
-
 #ifdef FULL
 //-----------------------------------------------------------------------------
 // bool STORMAPI SFileSetDownloadCallback(HANDLE, SFILE_DOWNLOAD_CALLBACK, void *);
@@ -488,6 +487,7 @@ bool STORMAPI SFileSetDownloadCallback(HANDLE hMpq, SFILE_DOWNLOAD_CALLBACK Down
 
     return FileStream_SetCallback(ha->pStream, DownloadCB, pvUserData);
 }
+#endif
 
 //-----------------------------------------------------------------------------
 // bool SFileFlushArchive(HANDLE hMpq)
@@ -535,7 +535,7 @@ bool STORMAPI SFileFlushArchive(HANDLE hMpq)
 			assert(0);
 #endif
         }
-
+#ifdef FULL
         if(ha->dwFlags & MPQ_FLAG_LISTFILE_NEW)
         {
             nError = SListFileSaveToMpq(ha);
@@ -549,13 +549,16 @@ bool STORMAPI SFileFlushArchive(HANDLE hMpq)
             if(nError != ERROR_SUCCESS)
                 nResultError = nError;
         }
+#endif
 
         // Save HET table, BET table, hash table, block table, hi-block table
         if(ha->dwFlags & MPQ_FLAG_CHANGED)
         {
+#ifdef FULL
             // Rebuild the HET table
             if(ha->pHetTable != NULL)
                 RebuildHetTable(ha);
+#endif
 
             // Save all MPQ tables first
             nError = SaveMPQTables(ha);
@@ -584,7 +587,6 @@ bool STORMAPI SFileFlushArchive(HANDLE hMpq)
         SetLastError(nResultError);
     return (nResultError == ERROR_SUCCESS);
 }
-#endif
 
 //-----------------------------------------------------------------------------
 // bool SFileCloseArchive(HANDLE hMpq);
@@ -593,7 +595,7 @@ bool STORMAPI SFileFlushArchive(HANDLE hMpq)
 bool STORMAPI SFileCloseArchive(HANDLE hMpq)
 {
     TMPQArchive * ha = IsValidMpqHandle(hMpq);
-    bool bResult = true;
+    bool bResult = false;
 
     // Only if the handle is valid
     if(ha == NULL)
@@ -607,10 +609,8 @@ bool STORMAPI SFileCloseArchive(HANDLE hMpq)
     ha->pfnAddFileCB = NULL;
     ha->pvAddFileUserData = NULL;
 
-#ifdef FULL
     // Flush all unsaved data to the storage
     bResult = SFileFlushArchive(hMpq);
-#endif
 
     // Free all memory used by MPQ archive
     FreeArchiveHandle(ha);

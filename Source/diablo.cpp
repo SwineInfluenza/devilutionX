@@ -3,6 +3,8 @@
 #include "../DiabloUI/diabloui.h"
 #include <config.h>
 
+#include "demomode.h"
+
 DEVILUTION_BEGIN_NAMESPACE
 
 HWND ghMainWnd;
@@ -39,6 +41,7 @@ int color_cycle_timer;
 /* rdata */
 
 BOOL fullscreen = TRUE;
+int gnTickDelay = 50;
 int showintrodebug = 1;
 #ifdef _DEBUG
 int questdebug = -1;
@@ -153,6 +156,8 @@ void run_game_loop(unsigned int uMsg)
 	WNDPROC saveProc;
 	MSG msg;
 
+	demo::NotifyGameLoopStart();
+
 	nthread_ignore_mutex(TRUE);
 	start_game(uMsg);
 	/// ASSERT: assert(ghMainWnd);
@@ -181,8 +186,19 @@ void run_game_loop(unsigned int uMsg)
 		}
 		if (!gbRunGame)
 			break;
-		if (!nthread_has_500ms_passed(FALSE)) {
+
+		bool drawGame = true;
+		bool processInput = true;
+		bool runGameLoop = demo::IsRunning() ? demo::GetRunGameLoop(drawGame, processInput) : nthread_has_500ms_passed(FALSE);
+		if (demo::IsRecording())
+			demo::RecordGameLoopResult(runGameLoop);
+
+		if (!runGameLoop) {
+			if (processInput)
 			ProcessInput();
+			if (!drawGame)
+				continue;
+			force_redraw |= 1;
 			DrawAndBlit();
 			continue;
 		}
@@ -190,8 +206,11 @@ void run_game_loop(unsigned int uMsg)
 		multi_process_network_packets();
 		game_loop(gbGameLoopStartup);
 		gbGameLoopStartup = FALSE;
+		if (drawGame)
 		DrawAndBlit();
 	}
+
+	demo::NotifyGameLoopEnd();
 
 	if (gbMaxPlayers > 1) {
 		pfile_write_hero();
@@ -333,6 +352,11 @@ static void print_help_and_exit()
 
 void diablo_parse_flags(int argc, char **argv)
 {
+	int demoNumber = -1;
+	int recordNumber = -1;
+	bool timedemo = false;
+	bool createDemoReference = false;
+
 	for (int i = 1; i < argc; i++) {
 		if (strcasecmp("-h", argv[i]) == 0 || strcasecmp("--help", argv[i]) == 0) {
 			print_help_and_exit();
@@ -357,6 +381,15 @@ void diablo_parse_flags(int argc, char **argv)
 			if (prefPath.back() != '/')
 				prefPath += '/';
 #endif
+		} else if (strcasecmp("--demo", argv[i]) == 0) {
+			demoNumber = SDL_atoi(argv[++i]);
+			showintrodebug = 0;
+		} else if (strcasecmp("--timedemo", argv[i]) == 0) {
+			timedemo = true;
+		} else if (strcasecmp("--record", argv[i]) == 0) {
+			recordNumber = SDL_atoi(argv[++i]);
+		} else if (strcasecmp("--create-reference", argv[i]) == 0) {
+			createDemoReference = true;
 		} else if (strcasecmp("-n", argv[i]) == 0) {
 			showintrodebug = 0;
 		} else if (strcasecmp("-f", argv[i]) == 0) {
@@ -409,6 +442,11 @@ void diablo_parse_flags(int argc, char **argv)
 			print_help_and_exit();
 		}
 	}
+
+	if (demoNumber != -1)
+		demo::InitPlayBack(demoNumber, timedemo);
+	if (recordNumber != -1)
+		demo::InitRecording(recordNumber, createDemoReference);
 }
 
 void diablo_init_screen()
@@ -1643,7 +1681,7 @@ void game_loop(BOOL bStartup)
 {
 	int i;
 
-	i = bStartup ? 60 : 3;
+	i = bStartup ? sgGameInitInfo.nTickRate * 3 : 3;
 
 	while (i--) {
 		if (!multi_handle_delta()) {
@@ -1653,7 +1691,7 @@ void game_loop(BOOL bStartup)
 			timeout_cursor(FALSE);
 			game_logic();
 		}
-		if (!gbRunGame || gbMaxPlayers == 1 || !nthread_has_500ms_passed(TRUE))
+		if (!gbRunGame || gbMaxPlayers == 1 || demo::IsRecording() || demo::IsRunning() || !nthread_has_500ms_passed(TRUE))
 			break;
 	}
 }

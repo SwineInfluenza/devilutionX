@@ -9,6 +9,9 @@ int progress_id;
 const BYTE BarColor[3] = { 138, 43, 254 };
 const int BarPos[3][2] = { { 53, 37 }, { 53, 421 }, { 53, 37 } };
 
+static uint32_t CustomEventsBegin;
+static constexpr uint32_t NumCustomEvents = WM_DIABLOADGAME - WM_DIABNEXTLVL + 1;
+
 void interface_msg_pump()
 {
 	MSG Msg;
@@ -418,6 +421,44 @@ void InitCutscene(unsigned int uMsg)
 	}
 
 	sgdwProgress = 0;
+}
+
+void RegisterCustomEvents()
+{
+#if SDL_VERSION_ATLEAST(2, 0, 0)
+	CustomEventsBegin = SDL_RegisterEvents(NumCustomEvents);
+#else
+	CustomEventsBegin = SDL_USEREVENT;
+#endif
+}
+
+bool IsCustomEvent(uint32_t eventType)
+{
+	return eventType >= CustomEventsBegin && eventType < CustomEventsBegin + NumCustomEvents;
+}
+
+uint32_t GetCustomEvent(uint32_t eventType)
+{
+	return eventType - CustomEventsBegin;
+}
+
+interface_mode GetCustomMessage(uint32_t eventType)
+{
+	return static_cast<interface_mode>(eventType - CustomEventsBegin + WM_DIABNEXTLVL);
+}
+
+uint32_t CustomEventToSdlEvent(uint32_t eventType)
+{
+#if SDL_VERSION_ATLEAST(2, 0, 0)
+	return CustomEventsBegin + eventType - SDL_USEREVENT;
+#else
+	return CustomEventsBegin + eventType - 0x8000;
+#endif
+}
+
+uint32_t CustomMessageToSdlEvent(interface_mode messageType)
+{
+	return CustomEventsBegin + messageType - WM_DIABNEXTLVL;
 }
 
 DEVILUTION_END_NAMESPACE

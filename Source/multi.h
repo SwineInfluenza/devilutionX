@@ -14,6 +14,7 @@ extern BYTE gbMaxPlayers;
 extern char szPlayerName[128];
 extern BYTE gbDeltaSender;
 extern int player_state[MAX_PLRS];
+extern _gamedata sgGameInitInfo;
 
 void multi_msg_add(BYTE *pbMsg, BYTE bLen);
 void NetSendLoPri(BYTE *pbMsg, BYTE bLen);

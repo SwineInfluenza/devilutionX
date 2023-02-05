@@ -2,6 +2,8 @@
 #include "../3rdParty/Storm/Source/storm.h"
 #include "../SourceX/display.h"
 
+#include "demomode.h"
+
 DEVILUTION_BEGIN_NAMESPACE
 
 BYTE movie_playing;
@@ -10,6 +12,9 @@ BOOL loop_movie;
 void play_movie(char *pszMovie, BOOL user_can_close)
 {
 	HANDLE video_stream;
+
+	if (demo::IsRunning())
+		return;
 
 	movie_playing = TRUE;
 	sound_disable_music(TRUE);

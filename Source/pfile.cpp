@@ -3,6 +3,13 @@
 #include "../DiabloUI/diabloui.h"
 #include "file_util.h"
 
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+
+#include "demomode.h"
+
 DEVILUTION_BEGIN_NAMESPACE
 
 #ifdef SPAWN
@@ -581,6 +588,478 @@ void pfile_update(BOOL force_save)
 			pfile_write_hero();
 		}
 	}
+}
+
+/**
+ * Demomode save file comparison utility
+ *
+ */
+void pfile_get_save_file_name(char *pszName, DWORD dwBufSize)
+{
+#ifdef SPAWN
+	const char *format = (gbMaxPlayers <= 1) ? "spawn_%d.sv" : "share_%d.sv";
+#else
+	const char *format = (gbMaxPlayers <= 1) ? "single_%d.sv" : "multi_%d.sv";
+#endif
+	snprintf(pszName, dwBufSize, format, pfile_get_save_num_from_name(plr[myplr]._pName));
+}
+
+struct EncoderBuffer {
+	EncoderBuffer(std::unique_ptr<byte[]> dataBuff, uint32_t dataSize, uint32_t buffSize)
+	    : size_ { dataSize }
+	    , buffer_ { dataBuff.release() }
+	{
+		uint32_t finalSize = std::min(codec_get_encoded_len(size_), buffSize);
+		codec_encode(buffer_.get(), size_, finalSize, (gbMaxPlayers <= 1 ? PASSWORD_SINGLE : PASSWORD_MULTI));
+		size_ = finalSize;
+	}
+
+	const byte *get() const
+	{
+		return buffer_.get();
+	}
+
+	uint32_t size() const
+	{
+		return size_;
+	}
+
+private:
+	uint32_t size_;
+	std::unique_ptr<byte[]> buffer_;
+};
+
+struct DecoderBuffer {
+	DecoderBuffer(std::unique_ptr<byte[]> dataBuff, uint32_t buffSize)
+		: size_ { buffSize }
+	    , buffer_ { dataBuff.release() }
+	{
+		uint32_t finalSize;
+		finalSize = codec_decode(buffer_.get(), size_, (gbMaxPlayers <= 1 ? PASSWORD_SINGLE : PASSWORD_MULTI));
+		size_ = finalSize;
+	}
+
+	const byte *get() const
+	{
+		return buffer_.get();
+	}
+
+	uint32_t size() const
+	{
+		return size_;
+	}
+
+private:
+	uint32_t size_;
+	std::unique_ptr<byte[]> buffer_;
+};
+
+auto MpqOpenArchive(const char *szMpqName)
+{
+	using unique_archive = std::unique_ptr<void, decltype(&SFileCloseArchive)>;
+
+	HANDLE hArchive;
+	if (SFileOpenArchive(szMpqName, 0x7000, FS_PC, &hArchive))
+		return unique_archive { hArchive, &SFileCloseArchive };
+
+	return unique_archive { nullptr, &SFileCloseArchive };
+}
+
+DecoderBuffer MpqReadFile(HANDLE hArchive, const char *szFileName)
+{
+	using unique_file = std::unique_ptr<void, decltype(&SFileCloseFile)>;
+
+	auto MpqOpenRFile = [](HANDLE hArchive, const char *szFileName) {
+		HANDLE hFile;
+		// SFileOpenFileEx(hArchive, szFileName, SFILE_OPEN_FROM_MPQ, &hFile)
+		if (SFileOpenFileEx(hArchive, szFileName, 0, &hFile))
+			return unique_file { hFile, &SFileCloseFile };
+
+		return unique_file { nullptr, &SFileCloseFile };
+	};
+
+	unique_file file = MpqOpenRFile(hArchive, szFileName);
+	if (file.get() == nullptr)
+		app_fatal("Unable to open the file");
+
+	uint32_t fileSize = SFileGetFileSize(file.get(), nullptr);
+	std::unique_ptr<byte[]> buffer { new byte[fileSize] };
+
+	if (!SFileReadFile(file.get(), buffer.get(), fileSize, nullptr, nullptr))
+		app_fatal("Unable to read the file");
+
+	return { std::move(buffer), fileSize };
+}
+
+void MpqWriteFile(HANDLE hArchive, const char *szFileName, const EncoderBuffer &dataBuff)
+{
+	using unique_file = std::unique_ptr<void, decltype(&SFileFinishFile)>;
+
+	auto MpqOpenWFile = [](HANDLE hArchive, const char *szFileName, DWORD dwFileSize) {
+		HANDLE hFile;
+		// SFileCreateFile(hArchive, szFileName, 0, dwFileSize, LANG_NEUTRAL, MPQ_FILE_IMPLODE | MPQ_FILE_REPLACEEXISTING, &hFile)
+		if (SFileCreateFile(hArchive, szFileName, 0, dwFileSize, 0, 0x00000100 | 0x80000000, &hFile))
+			return unique_file { hFile, &SFileFinishFile };
+
+		return unique_file { nullptr, &SFileFinishFile };
+	};
+
+	unique_file file = MpqOpenWFile(hArchive, szFileName, dataBuff.size());
+	if (file.get() == nullptr)
+		app_fatal("Unable to open the file");
+
+	// SFileWriteFile(file.get(), dataBuff.get(), dataBuff.size(), MPQ_COMPRESSION_PKWARE)
+	if (!SFileWriteFile(file.get(), dataBuff.get(), dataBuff.size(), 0x08))
+		app_fatal("Unable to write the file");
+}
+
+void CopySaveFile(uint32_t saveNum, const std::string &targetPath)
+{
+	char savePath[MAX_PATH];
+
+	pfile_get_save_path(savePath, sizeof(savePath), saveNum);
+	std::fstream saveStream { savePath, std::fstream::in | std::fstream::binary };
+	if (!saveStream)
+		return;
+
+	std::fstream targetStream { targetPath, std::fstream::out | std::fstream::binary | std::fstream::trunc };
+	if (!targetStream)
+		return;
+
+	targetStream << saveStream.rdbuf();
+}
+
+class MemoryBuffer : public std::basic_streambuf<char> {
+public:
+	MemoryBuffer(char *data, size_t byteCount)
+	{
+		setg(data, data, data + byteCount);
+		setp(data, data + byteCount);
+	}
+};
+
+struct CompareInfo {
+	DecoderBuffer &data;
+	size_t currentPosition;
+	size_t size;
+	bool isTownLevel;
+	bool dataExists;
+};
+
+struct CompareCounter {
+	int reference;
+	int actual;
+	int max()
+	{
+		return std::max(reference, actual);
+	}
+	void checkIfDataExists(int count, CompareInfo &compareInfoReference, CompareInfo &compareInfoActual)
+	{
+		if (reference == count)
+			compareInfoReference.dataExists = false;
+		if (actual == count)
+			compareInfoActual.dataExists = false;
+	}
+};
+
+inline bool string_ends_with(std::string const &value, std::string const &ending)
+{
+	if (ending.size() > value.size())
+		return false;
+	return std::equal(ending.rbegin(), ending.rend(), value.rbegin());
+}
+
+void CreateDetailDiffs(const std::string &prefix, const std::string &memoryMapFile, CompareInfo &compareInfoReference, CompareInfo &compareInfoActual, std::unordered_map<std::string, size_t> &foundDiffs)
+{
+	char basePath[MAX_PATH];
+	GetBasePath(basePath, MAX_PATH);
+
+	// NOTE: File /memory_map/level.txt needs an additional entry "M_DL 12544 8 dMissile" at the very end
+	std::string memoryMapFileAssetName { std::string { basePath } + "/memory_map/" + memoryMapFile + ".txt" };
+
+	SDL_RWops *handle = SDL_RWFromFile(memoryMapFileAssetName.c_str(), "r");
+	if (handle == nullptr) {
+		app_fatal("MemoryMapFile %s is missing", memoryMapFile.c_str());
+		return;
+	}
+
+	size_t readBytes = SDL_RWsize(handle);
+	std::unique_ptr<byte[]> memoryMapFileData { new byte[readBytes] };
+	SDL_RWread(handle, memoryMapFileData.get(), readBytes, 1);
+
+	MemoryBuffer buffer { reinterpret_cast<char *>(memoryMapFileData.get()), readBytes };
+	std::istream reader(&buffer);
+
+	std::unordered_map<std::string, CompareCounter> counter;
+
+	auto getCounter = [&](const std::string &counterAsString) {
+		auto it = counter.find(counterAsString);
+		if (it != counter.end())
+			return it->second;
+		int countFromMapFile = std::stoi(counterAsString);
+		return CompareCounter { countFromMapFile, countFromMapFile };
+	};
+
+	auto addDiff = [&](const std::string &diffKey) {
+		auto it = foundDiffs.find(diffKey);
+		if (it == foundDiffs.end()) {
+			foundDiffs.insert_or_assign(diffKey, 1);
+		} else {
+			foundDiffs.insert_or_assign(diffKey, it->second + 1);
+		}
+	};
+
+	auto compareBytes = [&](size_t countBytes) {
+		if (compareInfoReference.dataExists && compareInfoReference.currentPosition + countBytes > compareInfoReference.size)
+			app_fatal("Comparsion failed. Too less bytes in reference to compare. Location: %s", prefix.c_str());
+		if (compareInfoActual.dataExists && compareInfoActual.currentPosition + countBytes > compareInfoActual.size)
+			app_fatal("Comparsion failed. Too less bytes in actual to compare. Location: %s", prefix.c_str());
+		bool result = true;
+		if (compareInfoReference.dataExists && compareInfoActual.dataExists)
+			result = memcmp(compareInfoReference.data.get() + compareInfoReference.currentPosition, compareInfoActual.data.get() + compareInfoActual.currentPosition, countBytes) == 0;
+		if (compareInfoReference.dataExists)
+			compareInfoReference.currentPosition += countBytes;
+		if (compareInfoActual.dataExists)
+			compareInfoActual.currentPosition += countBytes;
+		return result;
+	};
+
+	auto read32BitInt = [&](CompareInfo &compareInfo, bool useLE) {
+		int32_t value = 0;
+		if (!compareInfo.dataExists)
+			return value;
+		if (compareInfo.currentPosition + sizeof(value) > compareInfo.size)
+			app_fatal("read32BitInt failed. Too less bytes to read.");
+		memcpy(&value, compareInfo.data.get() + compareInfo.currentPosition, sizeof(value));
+		if (useLE)
+			value = SDL_SwapLE32(value);
+		else
+			value = SDL_SwapBE32(value);
+		return value;
+	};
+
+	std::string line;
+	while (std::getline(reader, line)) {
+		if (line.size() > 0 && line[line.size() - 1] == '\r')
+			line.resize(line.size() - 1);
+		if (line.size() == 0)
+			continue;
+		std::stringstream lineStream { line };
+		std::string command;
+		std::getline(lineStream, command, ' ');
+
+		bool dataExistsReference = compareInfoReference.dataExists;
+		bool dataExistsActual = compareInfoActual.dataExists;
+
+		// Skip Hellfire-specific entries
+		if (string_ends_with(command, "_HF"))
+			continue;
+		if (string_ends_with(command, "_DA"))
+			command.resize(command.size() - 3);
+		if (string_ends_with(command, "_DL")) {
+			if (compareInfoReference.isTownLevel && compareInfoActual.isTownLevel)
+				continue;
+			if (compareInfoReference.isTownLevel)
+				compareInfoReference.dataExists = false;
+			if (compareInfoActual.isTownLevel)
+				compareInfoActual.dataExists = false;
+			command.resize(command.size() - 3);
+		}
+		if (command == "R" || command == "LT" || command == "LC" || command == "LC_LE") {
+			std::string bitsAsString;
+			std::getline(lineStream, bitsAsString, ' ');
+			std::string comment;
+			std::getline(lineStream, comment);
+
+			size_t bytes = static_cast<size_t>(std::stoi(bitsAsString) / 8);
+
+			if (command == "LT") {
+				int32_t valueReference = read32BitInt(compareInfoReference, false);
+				int32_t valueActual = read32BitInt(compareInfoActual, false);
+				assert(sizeof(valueReference) == bytes);
+				compareInfoReference.isTownLevel = valueReference == 0;
+				compareInfoActual.isTownLevel = valueActual == 0;
+			}
+			if (command == "LC" || command == "LC_LE") {
+				int32_t valueReference = read32BitInt(compareInfoReference, command == "LC_LE");
+				int32_t valueActual = read32BitInt(compareInfoActual, command == "LC_LE");
+				assert(sizeof(valueReference) == bytes);
+				counter.insert_or_assign(comment, CompareCounter { valueReference, valueActual });
+			}
+
+			if (!compareBytes(bytes)) {
+				std::string diffKey { prefix + "." + comment };
+				addDiff(diffKey);
+			}
+		} else if (command == "M") {
+			std::string countAsString;
+			std::getline(lineStream, countAsString, ' ');
+			std::string bitsAsString;
+			std::getline(lineStream, bitsAsString, ' ');
+			std::string comment;
+			std::getline(lineStream, comment);
+
+			CompareCounter count = getCounter(countAsString);
+			size_t bytes = static_cast<size_t>(std::stoi(bitsAsString) / 8);
+			for (int i = 0; i < count.max(); i++) {
+				count.checkIfDataExists(i, compareInfoReference, compareInfoActual);
+				if (!compareBytes(bytes)) {
+					std::string diffKey { prefix + "." + comment };
+					addDiff(diffKey);
+				}
+			}
+		} else if (command == "C") {
+			std::string countAsString;
+			std::getline(lineStream, countAsString, ' ');
+			std::string subMemoryMapFile;
+			std::getline(lineStream, subMemoryMapFile, ' ');
+			std::string comment;
+			std::getline(lineStream, comment);
+
+			CompareCounter count = getCounter(countAsString);
+			subMemoryMapFile.erase(std::remove(subMemoryMapFile.begin(), subMemoryMapFile.end(), '\r'), subMemoryMapFile.end());
+			for (int i = 0; i < count.max(); i++) {
+				count.checkIfDataExists(i, compareInfoReference, compareInfoActual);
+				std::string subPrefix { prefix + "." + comment };
+				CreateDetailDiffs(subPrefix, subMemoryMapFile, compareInfoReference, compareInfoActual, foundDiffs);
+			}
+		}
+
+		compareInfoReference.dataExists = dataExistsReference;
+		compareInfoActual.dataExists = dataExistsActual;
+	}
+}
+
+struct CompareTargets {
+	std::string fileName;
+	std::string memoryMapFileName;
+	bool isTownLevel;
+};
+
+HeroCompareResult CompareSaves(const std::string &actualSavePath, const std::string &referenceSavePath, bool logDetails)
+{
+	std::vector<CompareTargets> possibleFileToCheck;
+	possibleFileToCheck.push_back({ "hero", "hero", false });
+	possibleFileToCheck.push_back({ "game", "game", false });
+
+	char szPerm[MAX_PATH];
+	for (int i = 0; GetPermSaveNames(i, szPerm); i++) {
+		possibleFileToCheck.push_back({ szPerm, "level", i == 0 });
+	}
+
+	auto actualArchive = MpqOpenArchive(actualSavePath.c_str());
+	if (actualArchive.get() == nullptr)
+		app_fatal("Unable to open save file archive %s", actualSavePath.c_str());
+	auto referenceArchive = MpqOpenArchive(referenceSavePath.c_str());
+	if (referenceArchive.get() == nullptr)
+		app_fatal("Unable to open save file archive %s", referenceSavePath.c_str());
+
+	bool compareResult = true;
+	std::string message;
+	for (const auto &compareTarget : possibleFileToCheck) {
+		auto fileDataActual = SFileHasFile(actualArchive.get(), compareTarget.fileName.c_str()) ? MpqReadFile(actualArchive.get(), compareTarget.fileName.c_str()) : DecoderBuffer { nullptr, 0 };
+		uint32_t fileSizeActual = fileDataActual.size();
+		auto fileDataReference = SFileHasFile(referenceArchive.get(), compareTarget.fileName.c_str()) ? MpqReadFile(referenceArchive.get(), compareTarget.fileName.c_str()) : DecoderBuffer { nullptr, 0 };
+		uint32_t fileSizeReference = fileDataReference.size();
+
+		if (fileDataActual.get() == nullptr && fileDataReference.get() == nullptr) {
+			continue;
+		}
+		if (fileSizeActual == fileSizeReference && memcmp(fileDataReference.get(), fileDataActual.get(), fileSizeActual) == 0)
+			continue;
+		compareResult = false;
+		if (!message.empty())
+			message.append("\n");
+		if (fileSizeActual != fileSizeReference)
+			message += "file \"" + compareTarget.fileName + "\" is different size. Expected: " + std::to_string(fileSizeReference) + " Actual: " + std::to_string(fileSizeActual);
+		else
+			message += "file \"" + compareTarget.fileName + "\" has different content.";
+		if (!logDetails)
+			continue;
+		std::unordered_map<std::string, size_t> foundDiffs;
+		CompareInfo compareInfoReference { fileDataReference, 0, fileSizeReference, compareTarget.isTownLevel, fileSizeReference != 0 };
+		CompareInfo compareInfoActual { fileDataActual, 0, fileSizeActual, compareTarget.isTownLevel, fileSizeActual != 0 };
+		CreateDetailDiffs(compareTarget.fileName, compareTarget.memoryMapFileName, compareInfoReference, compareInfoActual, foundDiffs);
+		if (compareInfoReference.currentPosition != fileSizeReference)
+			app_fatal("Comparsion failed. Uncompared bytes in reference. File: %s", compareTarget.fileName.c_str());
+		if (compareInfoActual.currentPosition != fileSizeActual)
+			app_fatal("Comparsion failed. Uncompared bytes in actual. File: %s", compareTarget.fileName.c_str());
+		for (auto entry : foundDiffs) {
+			message += "\nDiff found in " + entry.first + " count: " + std::to_string(entry.second);
+		}
+	}
+	return { compareResult ? HeroCompareResult::Same : HeroCompareResult::Difference, message };
+}
+
+void pfile_write_save(HANDLE hArchive)
+{
+	uint32_t gameSaveSize = codec_get_encoded_len(FILEBUFF);
+	std::unique_ptr<byte[]> gameSave { new byte[gameSaveSize] };
+
+	uint32_t gameDataSize;
+	SaveGameData(gameSave.get(), &gameDataSize);
+
+	EncoderBuffer gameData { std::move(gameSave), gameDataSize, gameSaveSize };
+	MpqWriteFile(hArchive, "game", gameData);
+
+	char szTemp[MAX_PATH], szPerm[MAX_PATH];
+
+	for (auto index = 0; GetTempSaveNames(index, szTemp) && GetPermSaveNames(index, szPerm); index++) {
+		if (SFileHasFile(hArchive, szTemp)) {
+			if (SFileHasFile(hArchive, szPerm)) {
+				SFileRemoveFile(hArchive, szPerm, 0);
+			}
+			SFileRenameFile(hArchive, szTemp, szPerm);
+		}
+	}
+
+	uint32_t heroSaveSize = codec_get_encoded_len(sizeof(PkPlayerStruct));
+	std::unique_ptr<byte[]> heroSave { new byte[heroSaveSize] };
+
+	// HACK: Packed player structure is not supposed to have any specific alignment
+	static_assert(alignof(PkPlayerStruct) == 1, "Unexpected alignment for PkPlayerStruct!");
+	PackPlayer(reinterpret_cast<PkPlayerStruct *>(heroSave.get()), myplr, gbMaxPlayers == 1);
+
+	EncoderBuffer heroData { std::move(heroSave), sizeof(PkPlayerStruct), heroSaveSize };
+	MpqWriteFile(hArchive, "hero", heroData);
+
+	SFileCompactArchive(hArchive, nullptr, 0);
+}
+
+void pfile_write_hero_demo(int demo)
+{
+	char savePath[MAX_PATH], saveFile[MAX_PATH];
+
+	GetPrefPath(savePath, MAX_PATH);
+	pfile_get_save_file_name(saveFile, MAX_PATH);
+	std::string referenceSavePath { std::string { savePath } + "demo_" + std::to_string(demo) + "_reference_" + saveFile };
+
+	CopySaveFile(pfile_get_save_num_from_name(plr[myplr]._pName), referenceSavePath);
+
+	auto saveWriter = MpqOpenArchive(referenceSavePath.c_str());
+	pfile_write_save(saveWriter.get());
+}
+
+HeroCompareResult pfile_compare_hero_demo(int demo, bool logDetails)
+{
+	char savePath[MAX_PATH], saveFile[MAX_PATH];
+
+	GetPrefPath(savePath, MAX_PATH);
+	pfile_get_save_file_name(saveFile, MAX_PATH);
+	std::string referenceSavePath { std::string { savePath } + "demo_" + std::to_string(demo) + "_reference_" + saveFile };
+
+	if (!FileExists(referenceSavePath.c_str()))
+		return { HeroCompareResult::ReferenceNotFound, {} };
+
+	std::string actualSavePath { std::string { savePath } + "demo_" + std::to_string(demo) + "_actual_" + saveFile };
+	{
+		CopySaveFile(pfile_get_save_num_from_name(plr[myplr]._pName), actualSavePath);
+
+		auto saveWriter = MpqOpenArchive(actualSavePath.c_str());
+		pfile_write_save(saveWriter.get());
+	}
+
+	return CompareSaves(actualSavePath, referenceSavePath, logDetails);
 }
 
 DEVILUTION_END_NAMESPACE
